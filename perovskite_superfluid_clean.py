@@ -61,10 +61,17 @@ from perovskite_bse_clean import (PARAMS_MAPBI3, SOC_MAPBI3, H_slab, build_kgrid
                                   getr0, _W_keldysh_mat, NF_SC, EPS0_BSE,
                                   EPS_I_KELD, EPS_ENV_KELD)
 
-# Spin multiplicity applied to every reported excitation density. The single-band
-# model tracks one (S_z gauge-fixed) valence/conduction pair per k; the physical
-# carrier density counts both spin projections, hence an overall factor of 2.
-SPIN_DEG = 2.0
+# Band degeneracy applied to the excitation density: each tracked (S_z gauge-fixed)
+# valence/conduction band is 2-fold (Kramers) degenerate, so n carries a factor 2.
+G_DEG = 2.0
+
+# Excitation densities (cm^-2) for the ARPES panels and their txt exports.
+ARPES_DENSITIES = (2e11, 6e11, 2e12, 3.2e12, 5e12, 7e12, 1e13)
+
+
+def _n_label(nt):
+    """Compact filename label for a density target, e.g. 2e11, 3.2e12, 1e13."""
+    return ("%.1e" % nt).replace('+', '').replace('.0e', 'e')
 
 
 # ---------------------------------------------------------------------------
@@ -247,7 +254,7 @@ def exciton_mode(ker):
 #  Self-consistent solver for one Delta_mu
 # ---------------------------------------------------------------------------
 def solve_superfluid(ker, Eg, dmu, a, mix=1.0, tol=1e-9, itmax=8000,
-                     seed=1e-2, g_deg=2.0, init=None, seed_mode=None):
+                     seed=1e-2, init=None, seed_mode=None):
     """
     Solve Eqs. (13)-(16) self-consistently for a single input Delta_mu.
 
@@ -262,7 +269,6 @@ def solve_superfluid(ker, Eg, dmu, a, mix=1.0, tol=1e-9, itmax=8000,
             (continuation) -- follows the coherent BCS branch instead of
             collapsing onto the normal (Delta=0) inverted state.
     seed_mode : coherence seed profile (default = exciton eigenmode A_k)
-    g_deg : spin/Kramers degeneracy used only for the density n
 
     Returns dict with f_v, f_c, Delta, e_minus, epsr_v, epsr_c, n_Ang, n_cm2,
     inverted (bool), n_inv (max f_c), converged (bool), iters, and the state
@@ -340,8 +346,8 @@ def solve_superfluid(ker, Eg, dmu, a, mix=1.0, tol=1e-9, itmax=8000,
     rho_vc, dr_v, dr_c = best_state
     _, f_v, f_c, Delta, e_minus, epsr_v, epsr_c = fixed_point((rho_vc, dr_v, dr_c))
 
-    # excitation density: n = SPIN_DEG * g * INT d2k/(2pi)^2 f_ck
-    n_Ang = SPIN_DEG*g_deg*inv*np.sum(f_c)          # 1/A^2 (incl. spin factor)
+    # excitation density: n = G_DEG * INT d2k/(2pi)^2 f_ck
+    n_Ang = G_DEG*inv*np.sum(f_c)                    # 1/A^2 (Kramers degeneracy)
     n_cm2 = n_Ang*1e16
     return dict(dmu=dmu, f_v=f_v, f_c=f_c, Delta=Delta, e_minus=e_minus,
                 epsr_v=epsr_v, epsr_c=epsr_c, kmax=k0, mu_v=mu_v, mu_c=mu_c,
@@ -356,8 +362,7 @@ def solve_superfluid(ker, Eg, dmu, a, mix=1.0, tol=1e-9, itmax=8000,
 # ---------------------------------------------------------------------------
 #  Notebook-faithful solver (BCS-problem-WS2-Plaquette_forVitaly.nb)
 # ---------------------------------------------------------------------------
-def solve_notebook(ker, Eg, dmu, a, delta0=1e-4, tol=1e-6, itmax=2000,
-                   g_deg=2.0):
+def solve_notebook(ker, Eg, dmu, a, delta0=1e-4, tol=1e-6, itmax=2000):
     """One-Delta_mu 1v/1c BCS solve replicating the reference Mathematica
     notebook EXACTLY (BCS-problem-WS2-Plaquette_forVitaly.nb), i.e. with NO
     exciton (BSE A_k) seed.
@@ -415,7 +420,7 @@ def solve_notebook(ker, Eg, dmu, a, delta0=1e-4, tol=1e-6, itmax=2000,
         if diff < tol:
             break
 
-    n_cm2 = SPIN_DEG*g_deg*inv*np.sum(f_c)*1e16       # density (incl. spin factor)
+    n_cm2 = G_DEG*inv*np.sum(f_c)*1e16                # density (Kramers degeneracy)
     return dict(dmu=dmu, f_v=f_v, f_c=f_c, Delta=Delta, e_minus=w[:, 0],
                 epsr_v=eps_v + HVV, epsr_c=eps_c + HCC, mu_v=mu_v, mu_c=mu_c,
                 kxy=ker['kxy'], idx=ker['idx'],
@@ -428,7 +433,7 @@ def solve_notebook(ker, Eg, dmu, a, delta0=1e-4, tol=1e-6, itmax=2000,
 #  Driver: scan Delta_mu
 # ---------------------------------------------------------------------------
 def scan(Nk=41, halfwidth=0.30, n_layers=3, dmu_list=None,
-         g_deg=2.0, wrap=True, verbose=True):
+         wrap=True, verbose=True):
     """Scan Delta_mu = E_x for the single-v/c (1v/1c) model.
 
     The condensate onset is the bare single-band exciton energy
@@ -466,7 +471,7 @@ def scan(Nk=41, halfwidth=0.30, n_layers=3, dmu_list=None,
               f"{'inv?':>5} {'conv':>5} {'it':>6}")
     init = None
     for dmu in dmu_list:
-        r = solve_superfluid(ker, Eg, float(dmu), a, g_deg=g_deg,
+        r = solve_superfluid(ker, Eg, float(dmu), a,
                              init=init, seed=1e-2, seed_mode=A0)
         # warm-start next dmu only from a coherent state (else re-nucleate)
         init = r['state'] if r['maxDelta'] > 1e-4 else None
@@ -486,7 +491,7 @@ def scan(Nk=41, halfwidth=0.30, n_layers=3, dmu_list=None,
 
 
 def scan_notebook(Nk=41, halfwidth=0.30, n_layers=3, dmu_list=None,
-                  g_deg=2.0, wrap=True, itmax=8000, verbose=True):
+                  wrap=True, itmax=8000, verbose=True):
     """Delta_mu sweep using the notebook-faithful COLD-START solver
     (solve_notebook): every Delta_mu is solved independently from the uniform
     Delta=1e-4 seed -- no exciton mode, no warm-start between points. Output
@@ -516,7 +521,7 @@ def scan_notebook(Nk=41, halfwidth=0.30, n_layers=3, dmu_list=None,
         print(f"# {'Dmu':>8} {'max|D|':>9} {'n(cm^-2)':>11} {'max f_c':>8} "
               f"{'inv?':>5} {'conv':>5} {'it':>6}")
     for dmu in dmu_list:
-        r = solve_notebook(ker, Eg, float(dmu), a, g_deg=g_deg, itmax=itmax)
+        r = solve_notebook(ker, Eg, float(dmu), a, itmax=itmax)
         rows.append(r)
         if verbose:
             print(f"  {dmu:8.4f} {r['maxDelta']*1e3:9.4f} {r['n_cm2']:11.3e} "
@@ -573,22 +578,24 @@ def arpes_signal(res, eta=0.07, nw=220, wrange=None, cut='ky0'):
 # ---------------------------------------------------------------------------
 #  Plain-text (.txt) exports of all data
 # ---------------------------------------------------------------------------
-def save_txt(out, outdir, densities=(7e11, 5e12, 1e13)):
+def save_txt(out, outdir, densities=ARPES_DENSITIES):
     """Write every dataset that also goes into the .npz/.pkl as human-readable
     .txt files in `outdir`:
 
-      superfluid_scan.txt        Delta_mu sweep summary (one row per Delta_mu):
-                                 dmu, n, max|Delta|, max f_c, inverted flag.
-      superfluid_kresolved.txt   full self-consistent solution at every k for
-                                 every Delta_mu: dmu, kx, ky, f_v, f_c, |Delta|,
-                                 e_minus, eps^r_v, eps^r_c.
-      superfluid_arpes.txt       ARPES bands/weights per k for the three density
-                                 panels: target_n, n, dmu, kx, E_ck, E_vk, fc, fv.
+      superfluid_scan.txt          Delta_mu sweep summary (one row per Delta_mu):
+                                   dmu, n, max|Delta|, max f_c, inverted flag.
+      superfluid_kresolved.txt     full self-consistent solution at every k for
+                                   every Delta_mu: dmu, kx, ky, f_v, f_c, |Delta|,
+                                   e_minus, eps^r_v, eps^r_c.
+      superfluid_arpes.txt         ARPES bands/weights per k for all density
+                                   panels: target_n, n, dmu, kx, E_ck, E_vk, fc, fv.
+      superfluid_arpes_n{d}.txt    one file per panel: the 2D A^<(k,w) map in
+                                   long format (kx, omega, A).
     """
     Eg, Ex = out['Eg'], out['Ex']
     meta = (f"MAPbI3 n={out.get('n_layers', 3)} superfluid scan | "
             f"Eg={Eg:.6f} eV  Ex={Ex:.6f} eV  binding={(Eg-Ex)*1e3:.1f} meV | "
-            f"densities include spin factor SPIN_DEG={SPIN_DEG:.0f}")
+            f"density n = G_DEG * INT d2k/(2pi)^2 f_c (Kramers degeneracy G_DEG={G_DEG:.0f})")
 
     # (1) scan summary -------------------------------------------------------
     dmu, nd, mD, finv = out['dmu'], out['ndens'], out['maxDelta'], out['finv']
@@ -616,11 +623,13 @@ def save_txt(out, outdir, densities=(7e11, 5e12, 1e13)):
                fmt='%.6e')
     print("saved", f2, f"({len(rows)} dmu x {len(rows[0]['f_c'])} k pts)")
 
-    # (3) ARPES bands/weights for the three density panels -------------------
+    # (3) ARPES bands/weights for all density panels (combined file) ---------
     picks = [min(rows, key=lambda r: abs(r['n_cm2'] - nt)) for nt in densities]
+    ars   = [arpes_signal(r) for r in picks]
+    lo = min(min(a['E_vk'].min(), a['E_ck'].min()) for a in ars) - 0.35
+    hi = max(max(a['E_vk'].max(), a['E_ck'].max()) for a in ars) + 0.35
     blocks = []
-    for nt, r in zip(densities, picks):
-        ar = arpes_signal(r)
+    for nt, r, ar in zip(densities, picks, ars):
         m = len(ar['kx'])
         blocks.append(np.column_stack([
             np.full(m, nt), np.full(m, r['n_cm2']), np.full(m, r['dmu']),
@@ -631,6 +640,20 @@ def save_txt(out, outdir, densities=(7e11, 5e12, 1e13)):
                              "E_vk_eV  f_c  f_v",
                fmt='%.6e')
     print("saved", f3)
+
+    # (4) per-panel 2D A^<(k,w) maps (one file each) -------------------------
+    for nt, r in zip(densities, picks):
+        ar = arpes_signal(r, wrange=(lo, hi))          # common w-axis (as plotted)
+        KX, W = np.meshgrid(ar['kx'], ar['w'])         # A has shape (nw, nkx)
+        cols = np.column_stack([KX.ravel(), W.ravel(), ar['A'].ravel()])
+        fp = os.path.join(outdir, f'superfluid_arpes_n{_n_label(nt)}.txt')
+        np.savetxt(fp, cols,
+                   header=meta + f"\ntarget_n={nt:.3e} cm^-2  n={r['n_cm2']:.6e} "
+                                 f"cm^-2  dmu={r['dmu']:.6f} eV  "
+                                 f"{'inverted' if r['inverted'] else 'BEC'}"
+                                 "\nkx_invA  omega_eV  A_kw",
+                   fmt='%.6e')
+        print("saved", fp)
 
 
 def _pick_bec_bcs(coh):
@@ -652,10 +675,10 @@ def _pick_three(coh, n_mid=5e12):
 
 
 def make_arpes_figure(out, fname="superfluid_arpes.png",
-                      densities=(7e11, 5e12, 1e13)):
-    """ARPES A^<(k,w) maps at three fixed excitation densities (default
-    7e11, 5e12, 1e13 cm^-2). For each target the nearest scan row is used, and a
-    common energy axis is shared across the three panels."""
+                      densities=ARPES_DENSITIES, ncols=3):
+    """ARPES A^<(k,w) maps at a set of fixed excitation densities (default
+    ARPES_DENSITIES). For each target the nearest scan row is used; a common
+    energy axis is shared across panels, laid out in a grid of `ncols` columns."""
     import matplotlib; matplotlib.use("Agg")
     import matplotlib.pyplot as plt
     rows = out['rows']
@@ -665,8 +688,13 @@ def make_arpes_figure(out, fname="superfluid_arpes.png",
     ars = [arpes_signal(r) for r in picks]
     lo = min(min(a['E_vk'].min(), a['E_ck'].min()) for a in ars) - 0.35
     hi = max(max(a['E_vk'].max(), a['E_ck'].max()) for a in ars) + 0.35
-    fig, axes = plt.subplots(1, 3, figsize=(13.5, 4.4))
-    for ax, r, nt in zip(axes, picks, densities):
+    n = len(picks)
+    ncols = min(ncols, n)
+    nrows = int(np.ceil(n/ncols))
+    fig, axes = plt.subplots(nrows, ncols, figsize=(4.5*ncols, 4.4*nrows),
+                             squeeze=False)
+    axflat = axes.ravel()
+    for ax, r, nt in zip(axflat, picks, densities):
         ar = arpes_signal(r, wrange=(lo, hi))          # common w-axis
         pc = ax.pcolormesh(ar['kx'], ar['w'], ar['A'], shading='auto',
                            cmap='turbo')
@@ -679,6 +707,8 @@ def make_arpes_figure(out, fname="superfluid_arpes.png",
                      f"$\\Delta\\mu$={r['dmu']:.3f} eV  "
                      f"{'inverted' if r['inverted'] else 'BEC'}")
         fig.colorbar(pc, ax=ax, fraction=0.046, label=r'$A^<(k,\omega)$')
+    for ax in axflat[n:]:                              # hide unused cells
+        ax.axis('off')
     fig.tight_layout(); fig.savefig(fname, dpi=140)
     print("saved", fname, "at n =", [f"{r['n_cm2']:.2e}" for r in picks])
 

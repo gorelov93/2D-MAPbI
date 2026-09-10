@@ -1,4 +1,4 @@
-# MAPbI3 n=3 superfluid scan | Eg=2.178282 eV  Ex=1.991594 eV  binding=186.7 meV | densities include spin factor SPIN_DEG=2
+# MAPbI3 n=3 superfluid scan | Eg=2.178282 eV  Ex=1.991594 eV  binding=186.7 meV | density n = G_DEG * INT d2k/(2pi)^2 f_c (Kramers degeneracy G_DEG=2)
 # dmu_eV  kx_invA  ky_invA  f_v  f_c  absDelta_eV  e_minus_eV  epsr_v_eV  epsr_c_eV
 1.971600e+00 1.986655e-01 1.986655e-01 1.000000e+00 4.357091e-22 4.566239e-11 -6.471683e-01 -5.438274e-01 3.615334e+00
 1.971600e+00 1.986655e-01 2.136655e-01 1.000000e+00 5.102156e-22 4.852988e-11 -6.428479e-01 -5.395070e-01 3.580578e+00
